@@ -1,0 +1,638 @@
+<?php
+function role_lease_dibs_entity_info_alter(&$entity_info) {
+  $entity_info['role_lease_type']['view modes']['dibs_payment'] = array(
+    'label' => t('Dibs payment'),
+    'custom settings' => TRUE,
+  );
+  //dsm($entity_info);
+}
+
+function role_lease_dibs_preprocess_entity(&$vars) {
+  //TODO: what to check? Where  is this set?
+  if($vars['entity_type'] === 'role_lease_type') {
+    if(isset($vars['role_lease_type']->role_lease_dibs_purchasable)) {
+      $vars['classes_array'][] = $vars['role_lease_type']->role_lease_dibs_purchasable ? 'role-lease-dibs-purchasable' : 'role-lease-dibs-not-purchasable';
+    }
+  }
+}
+
+function role_lease_dibs_init() {
+  /*
+  $path = libraries_get_path('money_php');
+  //Or use drupal autoloading, possible with libraries?
+  require_once $path . '/Money.php';
+  require_once $path . '/Currency.php';
+   */
+/*
+  db_select('dibs_transactions', 'dt')
+    ->fields('dt')
+    ->execute();
+*/
+}
+
+function role_lease_dibs_registry_files_alter(&$files, $modules) {
+  $library_path = libraries_get_path('money_php');
+  if(!$library_path) {
+    return;
+  }
+  foreach (array('Money.php', 'Currency.php') as $filename) {
+    $files[$library_path . '/' . $filename] = array(
+      'module' => 'role_lease_dibs',
+      'weight' => 0,
+    );
+  }
+}
+
+function role_lease_dibs_field_info() {
+  return array(
+    'role_lease_dibs' => array(
+      'label' => t('Dibs payment form'),
+      'description' => t('TODO'),
+      //'settings' => array('dibs_settings'), //dibs settings reference?
+      'instance_settings' => array(''), //dibs settings reference?
+      'default_widget' => 'role_lease_dibs_field_widget',
+      'default_formatter' => 'role_lease_dibs_field_payment_form',
+      //'no_ui' => TRUE, //TODO: uncomment this on later
+    )
+  );
+}
+
+function role_lease_dibs_field_is_empty($item, $field) {
+  return empty($item['amount']);
+}
+
+function role_lease_dibs_field_widget_info() {
+  return array(
+    'role_lease_dibs_field_widget' => array(
+      'label' => t('Dibs payment'),
+      'field types' => array('role_lease_dibs'),
+      'settings' => array(),
+      'behaviors' => array(
+        'multiple_values' => FIELD_BEHAVIOR_DEFAULT,
+        'default value' => FIELD_BEHAVIOR_NONE,
+      ),
+    ),
+  );
+}
+
+function role_lease_dibs_currency_options_list() {
+  //Currencies supported by dibs, in ISO 4217
+  return array(
+    'DKK' => 'Danish Kroner (DKK)',
+    'EUR' => 'Euro (EUR)',
+    'USD' => 'US Dollar $ (USD)',
+    'GBP' => 'English Pound £ (GBP)',
+    'SEK' => 'Swedish Kronor (SEK)',
+    'AUD' => 'Australian Dollar (AUD',
+    'CAD' => 'Canadian Dollar (CAD)',
+    'ISK' => 'Icelandic Króna (ISK)',
+    'JPY' => 'Japanese Yen (JPY)',
+    'NZD' => 'New Zealand Dollar (NZD)',
+    'NOK' => 'Norwegian Kroner (NOK)',
+    'CHF' => 'Swiss Franc (CHF)',
+    'TRY' => 'Turkish Lire (TRY)',
+  );
+}
+
+
+function role_lease_dibs_currency_codes() {
+  return array(
+    'DKK' => 208,
+    'EUR' => 978,
+    'USD' => 840,
+    'GBP' => 826,
+    'SEK' => 752,
+    'AUD' => 036,
+    'CAD' => 124,
+    'ISK' => 352,
+    'JPY' => 392,
+    'NZD' => 554,
+    'NOK' => 578,
+    'CHF' => 756,
+    'TRY' => 949,
+  );
+}
+
+function role_lease_dibs_currency_code_to_number($code) {
+  $mapping = role_lease_dibs_currency_codes();
+  return $mapping[$code];
+}
+
+function role_lease_dibs_currency_number_to_code($code) {
+  $mapping = array_flip(role_lease_dibs_currency_codes());
+  return $mapping[$code];
+}
+
+function role_lease_dibs_field_load($entity_type, $entities, $field, $instances, $langcode, &$items_by_entity, $age) {
+  if($field['type'] == 'role_lease_dibs') {
+    foreach($items_by_entity as &$items) {
+      foreach($items as &$item) {
+        //This is cached so actually quite efficient compared to using function "manually"
+        $item['currency_number'] = role_lease_dibs_currency_code_to_number($item['currency']);
+        $item['money'] = role_lease_dibs_item_money($item);
+      }
+    }
+  }
+}
+
+function role_lease_dibs_field_widget_form(&$form, &$form_state, $field, $instance, $langcode, $items, $delta, $element) {
+  switch($instance['widget']['type']) {
+    case 'role_lease_dibs_field_widget': //TODO: rename these things
+      //TODO: title etc, we have subfield so this must be handled as a field group or something?
+      $widget = array(
+        '#type' => 'fieldset',
+      );
+      $widget['amount'] = array(
+        '#type' => 'textfield',
+        '#title'=> t('Amount'),
+        '#description' => t('TODO.'),
+        '#element_validate' => array('element_validate_integer_positive'),
+        '#default_value' => isset($items[$delta]['money']) ?
+          $items[$delta]['money']->format(array('no_cents' => TRUE, 'symbol' => FALSE)) : NULL,
+      );
+      $widget['currency'] = array(
+        '#type' => 'select',
+        '#title' => t('Currency'),
+        '#options' => role_lease_dibs_currency_options_list(),
+        '#description' => t('TODO.'),
+        '#default_value' => isset($items[$delta]['currency']) ? $items[$delta]['currency'] : NULL,
+      );
+      break;
+  }
+  $element += $widget;
+  return $element;
+  //return $widget;
+}
+
+
+/*
+function role_lease_dibs_field_load($entity_type, $entity, $field, $instance, $langcode, &$items) {
+  foreach($items as &$item) {
+    //TODO: rename amount to cents?
+    //$currency = new Currency($item['currency']);
+    $item['money'] = new Money($item['amount'], $item['currency']);
+    //$item['money'] = $money->cents();
+  }
+}
+*/
+
+
+//TODO: should implememnt element type for money_php
+function role_lease_dibs_field_presave($entity_type, $entity, $field, $instance, $langcode, &$items) {
+  foreach($items as &$item) {
+    //TODO: rename amount to cents?
+    $currency = new Currency($item['currency']);
+    $money = new Money($item['amount'] * $currency->subunitToUnit, $currency);
+    $item['amount'] = $money->cents();
+  }
+}
+
+function role_lease_dibs_field_widget_settings_form($field, $instance) {
+  $widget = $instance['widget'];
+  $settings = $widget['settings'];
+  if($widget['type'] == 'role_lease_dibs_field_widget') {
+    //TODO: we probably have none
+  }
+}
+
+function role_lease_dibs_field_formatter_info() {
+  return array(
+    'role_lease_dibs_field_payment_form' => array(
+      'label' => t('Dibs payment form'),
+      'field types' => array('role_lease_dibs'),
+    ),
+  );
+}
+
+
+function role_lease_dibs_theme() {
+  $theme_path = drupal_get_path('module', 'role_lease_dibs') . '/theme';
+  $items = array(
+    'role_lease_dibs_payment' => array(
+      'render element' => 'dibs_payment',
+      'template' => 'role-lease-dibs-payment',
+      'pattern'  => 'role-lease-dibs-payment__[a-z0-9_]+',
+      'path' => $theme_path,
+    ),
+    'role_lease_dibs_payment_higher_weight_leases' => array(
+      'variables' => array('user_message' => NULL, 'role_leases' => NULL),
+      'template' => 'role-lease-dibs-payment-higher-weight-leases',
+      'pattern'  => 'role-lease-dibs-payment-higher-weight-leases__[a-z0-9_]+',
+      'path' => $theme_path,
+    ),
+    'role_lease_dibs_payment_lower_weight_leases' => array(
+      'variables' => array('user_message' => NULL, 'role_leases' => NULL),
+      'template' => 'role-lease-dibs-payment-lower-weight-leases',
+      'pattern'  => 'role-lease-dibs-payment-lower-weight-leases__[a-z0-9_]+',
+      'path' => $theme_path,
+    ),
+  );
+  return $items;
+}
+
+function role_lease_dibs_preprocess_role_lease_dibs_payment_higher_weight_leases(&$vars) {
+  //Nytt viewlage
+  $vars['lease_type_links'] = _role_lease_type_links($vars['role_leases']);
+  //Break out to theme function
+  $links = array();
+  foreach($vars['lease_type_links'] as $link) {
+    $links[] = l($link['title'], $link['href'], $link);
+  }
+  $links = count($links) > 1 ? implode(', ', array_slice($links, 0, count($links) - 1)) . ' ' . t('and') . ' ' . end($links) : reset($links);
+
+  //TODO: setting for this text
+  $vars['user_message'] = t('You cannot purchase this package until following packages has expired: ') . $links;
+
+}
+
+function role_lease_dibs_preprocess_role_lease_dibs_payment_lower_weight_leases(&$vars) {
+  $vars['lease_type_links'] = _role_lease_type_links($vars['role_leases']); // Or link to users lease?
+  $links = array();
+  foreach($vars['lease_type_links'] as $link) {
+    $links[] = l($link['title'], $link['href'], $link);
+  }
+  $links = count($links) > 1 ? implode(', ', array_slice($links, 0, count($links) - 1)) . ' ' . t('and') . ' ' . end($links) : reset($links);
+  //TODO: setting for this text
+  //TODO: format plural
+  $vars['user_message'] = t('If you purchase this package the following packages will be disabled: ') . $links;
+}
+
+//TODO: theme function for this
+//TODO: argument here is array<RoleLease> not array<RoleLeaseType>, bit confusing
+function _role_lease_type_links($role_leases) {
+  $links = array();
+  foreach($role_leases as $rlid => $role_lease) {
+    //Same format as used by theme_links
+    $lease_type = $role_lease->type();
+    //TODO: remove?
+    if($lease_type) {
+      $links[$role_lease->type] = array(
+        'title' => $lease_type->label,
+        'href' => $lease_type->path(),
+        'attributes' => array('class' => array('role-lease-type-' . $role_lease->type)),
+      );
+    }
+  }
+  return $links;
+}
+
+function role_lease_dibs_field_access($op, $field, $entity_type, $entity, $account) {
+  global $user;
+  return !($field['type'] == 'role_lease_dibs' && !$user->uid);
+}
+
+function role_lease_dibs_field_formatter_view($entity_type, $role_lease_type, $field, $instance, $langcode, $items, $display) {
+  $element = array(
+    '#theme' => 'role_lease_dibs_payment',
+  );
+  switch ($display['type']) {
+    case 'role_lease_dibs_field_payment_form':
+      //we only really support one item, TODO: create field programatically and lock to one item
+      $item = current($items);
+      $role_lease_type->role_lease_dibs_purchasable = TRUE;
+      $lease = $role_lease_type->getRoleLease();
+      if($lease && $lease->active) {
+        //TODO............
+        $element['information'] = array(
+          '#markup' => t('You have already bought this package'),
+        );
+        //TODO: setting for this
+        $role_lease_type->role_lease_dibs_purchasable = FALSE;
+      }
+      else {
+        list($lower, $higher) = role_lease_dibs_user_role_leases_partitioned_by_weight($role_lease_type);
+        if(!empty($lower)) {
+          //What to call this??
+          $theme = 'role_lease_dibs_payment_higher_weight_leases';
+          $element['information'] = array(
+            '#markup' => theme(array($theme, $theme . '__' . $role_lease_type->identifier()), array('role_leases' => $lower)),
+          );
+          $role_lease_type->role_lease_dibs_purchasable = FALSE;
+        }
+        else if(!empty($higher)) {
+          $theme = 'role_lease_dibs_payment_lower_weight_leases';
+          $element['information'] = array(
+            '#markup' => theme(array($theme, $theme . '__' . $role_lease_type->identifier()), array('role_leases' => $higher)),
+          );
+        }
+      }
+      if($role_lease_type->role_lease_dibs_purchasable) {
+        $element['payment_form'] = drupal_get_form($field['field_name'] . '_role_lease_payment_form', $role_lease_type, $field, $instance, $items);
+      }
+      /*
+      $role_lease_type->content += array('#attributes' => array());
+      $role_lease_type->content['#attributes'] += array('class' => array());
+      $role_lease_type->content['#attributes']['class'][] = $role_lease_purchasable ? 'purchasable' : 'not-purchasable';
+      */
+      break;
+  }
+
+
+  return $element;
+}
+
+/**
+ * Implements hook_forms().
+ * All roles lesase peyment forms share the same form handler.
+ */
+function role_lease_dibs_forms() {
+  foreach(array_keys(role_lease_dibs_fields()) as $field_name) {
+      $forms[$field_name . '_role_lease_payment_form']['callback'] = 'role_lease_payment_form';
+  }
+  return $forms;
+}
+
+function role_lease_payment_form($form, &$form_state, $role_lease_type, $field, $instance, $items) {
+  $item = current($items);
+  //TODO: theme function for currency
+  //TODO: lookup table for all currencies smallest unit, included in dibs module?
+  //TODO: theme function sfsef
+  //drupal_alter(
+  //TODO: fix, this is fucked
+  $item = role_lease_dibs_item_adjusted_amount($role_lease_type);
+  $form['role_lease_item'] = array(
+    '#type' => 'item',
+    '#title' => $role_lease_type->label,
+    '#markup' => $item['money']->format(),
+  );
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Go to payment'),
+  );
+  return $form;
+}
+
+//Or just use price??
+//Handle active inactive?
+function role_lease_dibs_user_role_leases_partitioned_by_weight($role_lease_type, $account = NULL) {
+  global $user;
+  if(!isset($account)) {
+    $account = $user;
+  }
+  $higher = array();
+  $lower = array();
+  $leases = role_lease_load_by_user($account, array('active' => 1)); //type type?
+  foreach($leases as $rlid => $lease) {
+    //TODO: replace with ->entityType()?
+    if($role_lease_type->type != $lease->bundle()) {
+      if($lease->type()->weight > $role_lease_type->weight) {
+        $higher[$rlid] = $lease;
+      }
+      else {
+        $lower[$rlid] = $lease;
+      }
+    }
+  }
+  return array($lower, $higher);
+}
+
+//temporary mockup
+//TODO: currency/refactor
+function role_lease_dibs_adjusted_amount($amount, $role_lease_type, $account = NULL) {
+  global $user;
+  if(!isset($account)) {
+    $account = $user;
+  }
+  $subtract_amount = 0;
+  $leases = role_lease_load_by_user($account, array('active' => 1)); //type type?
+  foreach($leases as $lease) {
+    if($role_lease_type->type !== $lease->type) {
+      $type = $lease->type();
+      $fraction = $lease->expiryFractionLeft();
+      $item = role_lease_dibs_field_get_item($type);
+      $subtract_amount += $fraction * $item['amount'];
+    }
+  }
+  if($subtract_amount < $amount) {
+    $amount -= $subtract_amount;
+  }
+  //TODO: fulhack, ingen aning hur man hanterar detta!
+  else {
+    $amount = 0;
+  }
+  return $amount;
+}
+
+function role_lease_dibs_item_money($item) {
+  return new Money($item['amount'], $item['currency']);
+}
+
+//TODO: refactor
+function role_lease_dibs_item_adjusted_amount($role_lease_type, $account = NULL) {
+  $item = role_lease_dibs_field_get_item($role_lease_type);
+  $item['amount'] = role_lease_dibs_adjusted_amount($item['amount'], $role_lease_type, $account);
+  $item['money'] = role_lease_dibs_item_money($item);
+  //TODO: Fix
+  $item['amount'] = round($item['money']->cents(), -$item['money']->currency()->decimalPlaces());
+  //Refresh money object
+  $item['money'] = role_lease_dibs_item_money($item);
+  return $item;
+}
+
+function role_lease_dibs_field_get_item($lease_type) {
+  return current(field_get_items('role_lease_type', $lease_type, 'field_dibs_payment'));
+}
+
+/*
+function role_lease_payment_form_validate($form, &$form_state) {
+  list($role_lease_type, $field, $instance, $items) = $form_state['build_info']['args'];
+  global $user;
+  $leases = role_lease_load_by_user($user->uid, array('active' => 1));
+  //User has any other active leases/subscriptions? (The one we just created will not be included since it's not active)
+  if(!empty($leases)) {
+    //Redirect to blablab
+  }
+}
+ */
+
+function role_lease_payment_form_submit($form, $form_state) {
+  list($role_lease_type, $field, $instance, $items) = $form_state['build_info']['args'];
+  global $user;
+  $role_lease = $role_lease_type->getRoleLease($user->uid);
+  if(!isset($role_lease)) {
+    $role_lease = $role_lease_type->createRoleLease($user->uid); //Default could be current user uid?
+    $role_lease->save();
+  }
+  $field_name = $field['field_name'];
+
+  //TODO: we only care about one item so far
+  //$item = current($items);
+
+  $item = role_lease_dibs_item_adjusted_amount($role_lease_type);
+
+  $info = implode(':', array($user->name, $role_lease_type->label));
+
+  if($item['amount']) {
+
+
+/*
+    $currency_info = commerce_currency_load($transaction->currency_code);
+
+  $data = array(
+    'api_module'          => 'commerce_dibs',
+    'api_delta'           => 'commerce_dibs',
+    'payment_price'       => commerce_currency_amount_to_decimal($order_wrapper->commerce_order_total->amount->value(), $order_wrapper->commerce_order_total->currency_code->value()),
+    'payment_currency'    => $currency_info['numeric_code'],
+    'payment_order_id'    => '',
+    'params'              => array(
+                                   'commerce_order_id' => $order->order_id,
+                                   'payment_redirect_key' => $order->data['payment_redirect_key'],
+                                   ),
+  );
+
+  if ($use_split) {
+    $data['params']['split_payment_price'] = $split_payments;
+    $data['split_payments'] = count($split_payments);
+  }
+
+  */
+
+    $data = array(
+      'api_module'          => 'role_lease_dibs',
+      'api_delta'           => $field_name,
+      'payment_price'       => $item['amount'],
+      'payment_currency'    => $item['currency_number'],
+      //'customer_uid'        => $user->uid,
+      /*
+      'order_info_short'    => $info,
+      'order_info_long'     => array(
+        array('Qty', 'Text', 'Price'),
+        array('1', $role_lease_type->label, $item['amount']),
+      ),
+      */
+      /*
+      'order_price_info'    => array(
+        'Delivery' => '0',
+        'Vat' => $item['amount'] * 1.25, //TODO: how handle vat??
+      ),
+      */
+      'customer_name'       => $user->name,
+      'params'              => array('rlid' => $role_lease->rlid),
+    );
+    dibs_payment_prepare($data);
+  }
+  else {
+    //The role lease is gratis
+    //TODO: user message
+    _role_lease_dibs_role_lease_acquire($role_lease);
+  }
+}
+
+function role_lease_dibs_role_lease_load($entities) {
+  //dsm(func_get_args());
+  //dsm('serfsefsef fucking works');
+  //TODO: reference needed?
+  foreach($entities as $entity) {
+    //TODO: other way of check for dibs enableda, getting type here is also sort of expensive
+    if(role_lease_dibs_field_get_item($entity->type())) {
+      $result = db_select('role_lease_dibs_transaction', 'rldt')
+        ->fields('rldt', array('rlid', 'tid'))
+        ->execute();
+      $transactions = array();
+      foreach($result as $row) {
+        $transaction = dibs_transaction_load($row->tid);
+        if(isset($transaction)) {
+          $transactions[$row->tid] = $transaction;
+        }
+        else {
+          //Warning?
+          drupal_set_message('missing transaction', 'error');
+        }
+      }
+      //TODO: views integration for relation
+      $entity->role_lease_dibs_transactions = $transactions;
+    }
+  }
+}
+
+function _role_lease_dibs_field($field_info) {
+  return $field_info['type'] === 'role_lease_dibs';
+}
+
+function role_lease_dibs_fields() {
+  $fields = array();
+  return array_filter(field_info_fields(), '_role_lease_dibs_field');
+}
+
+function role_lease_dibs_dibsapi($op = 'info', $delta = NULL, &$transaction = NULL, $a3 = NULL, $a4 = NULL) {
+  switch ($op) {
+    case 'info':
+      //$fields = field_info_fields();
+      foreach(role_lease_dibs_fields() as $field_name => $field_info) {
+        $info[$field_name] = array('info' => $field_name);
+      }
+      if (!empty($delta)) {
+        return isset($info[$delta]) ? $info[$delta] : NULL;
+      }
+      else {
+        return $info;
+      }
+      break;
+    case 'transaction_cancel':
+      //Remove role lease?
+      watchdog('role_lease_dibs', $op . ': ' . print_r($transaction, TRUE), array(), WATCHDOG_DEBUG);
+      //Is this called also when insufficient funds etc?
+      break;
+    case 'transaction_accept':
+      //TODO: hur manga ganger kors dessa?
+      //TODO: som ovan, make sure this only runs once!!
+      //TODO: save transaction info in role lease, or relation!!
+      //Transaction is array here!?
+      role_lease_dibs_handle_transaction($transaction);
+      watchdog('role_lease_dibs', $op . ': ' . print_r($transaction, TRUE), array(), WATCHDOG_DEBUG);
+      watchdog('role_lease_dibs', $op . ': ' . print_r($_REQUEST, TRUE), array(), WATCHDOG_DEBUG);
+      //TODO: check what has been paid for, create role lease object(s) and save them 
+      break;
+    case 'transaction_callback':
+      role_lease_dibs_handle_transaction($transaction);
+      watchdog('role_lease_dibs', $op . ': ' . print_r($transaction, TRUE), array(), WATCHDOG_DEBUG);
+      watchdog('role_lease_dibs', $op . ': ' . print_r($_REQUEST, TRUE), array(), WATCHDOG_DEBUG);
+      //hmmm?
+      break;
+  }
+}
+
+function role_lease_dibs_handle_transaction($transaction) {
+  $rlid = isset($transaction['params']['rlid']) ? $transaction['params']['rlid'] : NULL;
+  if($rlid) {
+    $role_lease = role_lease_load($rlid);
+    if(!isset($role_lease->role_lease_dibs_transactions[$transaction['tid']])) {
+      _role_lease_dibs_role_lease_acquire($role_lease);
+      role_lease_dibs_register_transaction($role_lease, $transaction);
+      $code = role_lease_dibs_currency_number_to_code($transaction['payment_currency']);
+      $currency = new Currency($code);
+      $money = new Money($transaction['payment_price'], $currency);
+      rules_invoke_event('role_lease_dibs_payment_captured', $role_lease, $role_lease->type(), $money->format(), $transaction['payment_transaction_id']);
+    }
+  }
+  else {
+    //Super serious error
+  }
+}
+ 
+//TODO: naming etc, send object or ids? Better way of hooking in? Wrap all trasaction for payments
+function role_lease_dibs_register_transaction($role_lease, $transaction) {
+  if(is_array($transaction)) {
+    $transaction = (object) $transaction;
+  }
+  $data = array(
+    'rlid' => $role_lease->rlid,
+    'tid' => $transaction->tid,
+  );
+  drupal_write_record('role_lease_dibs_transaction', $data);
+  $query = db_insert('role_lease_dibs_transaction')
+    ->fields(array('rlid', 'pid'))
+    ->values(array('rlid' => $role_lease->rlid, 'tid' => $transaction->tid));
+}
+
+function _role_lease_dibs_role_lease_acquire($role_lease) {
+  //TODO: this stinks
+  list(, $higher) = role_lease_dibs_user_role_leases_partitioned_by_weight($role_lease->type());
+  foreach($higher as $lease) {
+    //TODO: special release status for this
+    $lease->release(); 
+  }
+  $role_lease->acquire();
+}
+
+?>

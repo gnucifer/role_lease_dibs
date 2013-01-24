@@ -1,0 +1,54 @@
+<?php
+function role_lease_dibs_field_schema($field) {
+  return array(
+    'columns' => array(
+      'amount' => array(
+        'description' => 'Price amount.',
+        'type' => 'int',
+        'unsigned' => TRUE,
+      ),
+      'currency' => array(
+        'description' => 'Price currency in ISO 4217 format.',
+        'type' => 'char',
+        'length' => 3,
+      ),
+    ),
+   'indexes' => array(
+      'amount' => array('amount'),
+    ),
+  );
+}
+
+function role_lease_dibs_schema() {
+  $schema['role_lease_dibs_transaction'] = array(
+    'description' => 'Stores role lease items.',
+    'fields' => array(
+      'rlid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'description' => 'The {role_lease}.rlid of the associataed role lease.',
+      ),
+      'tid' => array(
+        'type' => 'int',
+        'unsigned' => TRUE,
+        'description' => t('The {dibs_transactions}.tid of the associated dibs transaction.'),
+      ),
+    ),
+    'foreign keys' => array(
+      'rlid' => array(
+        'table' => 'role_lease', //users_roles?
+        'columns' => array('rlid' => 'rlid'),
+      ),
+      'tid' => array(
+        'table' => 'dibs_transactions',
+        'columns' => array('tid' => 'tid'),
+      ),
+    ),
+    'primary key' => array('rlid', 'tid'),
+  );
+  return $schema;
+}
+
+function role_lease_dibs_update_7100() {
+  drupal_install_schema('role_lease_dibs');
+}

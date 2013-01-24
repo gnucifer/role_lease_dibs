@@ -1,0 +1,8 @@
+name = Role lease DIBS
+description = Makes to possible to lease roles by payments through DIBS Payment Gateway
+core = 7.x
+package = DIBS
+dependencies[] = role_lease
+dependencies[] = dibs
+dependencies[] = libraries
+;configure = admin/config/payment/dibs_role_lease
